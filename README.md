@@ -44,6 +44,7 @@ SpiderCat is an advanced reconnaissance payload that aims to con*cat*anate targe
 - Advanced search and filtering of target data
 - See common geolocation related data between targets
 - Crucial IP related information
+- Anti-Virus Enumeration
 
 ## Resources:
 - [YouTube Video](https://youtu.be/qyLlB_oiOXM)
